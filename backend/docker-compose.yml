@@ -1,0 +1,66 @@
+# Local development environment for Reflex Logistics backend.
+# Spec reference: Section 47 (Deployment) - "development" environment.
+#
+# Usage:
+#   docker compose up -d postgres redis   # infra only, run the app with `npm run start:dev`
+#   docker compose up --build              # everything, including the app container
+
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reflex
+      POSTGRES_PASSWORD: reflex
+      POSTGRES_DB: reflex_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - reflex_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U reflex -d reflex_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      API_PREFIX: api/v1
+      DATABASE_URL: postgresql://reflex:reflex@postgres:5432/reflex_dev
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-only-access-secret-please-change-32chars
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_SECRET: dev-only-refresh-secret-please-change-32chr
+      JWT_REFRESH_EXPIRES_IN: 7d
+      CORS_ORIGIN: '*'
+      TRUST_PROXY: 'false'
+      LOG_LEVEL: info
+    ports:
+      - '3000:3000'
+
+volumes:
+  reflex_postgres_data:

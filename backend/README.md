@@ -48,3 +48,10 @@ The backend is the authority for business rules and state transitions.
 ## Development
 
 Backend-specific setup instructions will be added when the application is initialized.
+-e 
+---
+
+## Getting Started (generated)
+
+See `package.json` scripts. Run `npm install && npm run start:dev`.
+
