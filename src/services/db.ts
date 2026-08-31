@@ -43,9 +43,14 @@ export const api = {
     await new Promise(resolve => setTimeout(resolve, NETWORK_DELAY));
     const current = await api.getDeliveries();
     
-    const updated = current.map(dev => 
-      dev.id === id ? { ...dev, ...updates } : dev
-    );
+    const updated = current.map(dev => {
+      if (dev.id === id) {
+        // If the dispatcher is assigning a rider, explicitly stamp the riderId
+        const riderId = updates.status === 'ASSIGNED' && !updates.riderId ? 'R-01' : updates.riderId;
+        return { ...dev, ...updates, ...(riderId ? { riderId } : {}) };
+      }
+      return dev;
+    });
     
     localStorage.setItem('reflex_db', JSON.stringify(updated));
     return true;
