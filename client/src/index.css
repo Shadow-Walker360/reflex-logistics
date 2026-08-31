@@ -1,0 +1,88 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Reflex Logistics semantic color tokens.
+ * RGB triplets (not hex) so Tailwind's `<alpha-value>` opacity modifiers
+ * work (e.g. `bg-primary/10`). See docs/design-system.md §2 for the
+ * mapping rationale — this is the single place that mapping lives.
+ */
+:root {
+  --color-background: 247 248 246; /* graphite-50 */
+  --color-surface: 255 255 255;
+  --color-surface-elevated: 255 255 255;
+  --color-foreground: 22 28 25; /* graphite-900 */
+  --color-muted: 100 114 102; /* graphite-500 */
+  --color-border: 214 220 213; /* graphite-200 */
+
+  --color-primary: 94 122 63; /* olive-600 */
+  --color-primary-hover: 76 101 51; /* olive-700 */
+
+  --color-success: 94 122 63; /* olive-600 */
+  --color-warning: 217 154 30; /* amber-500 */
+  --color-info: 22 100 104; /* teal-600 */
+  --color-danger: 154 29 41; /* crimson-600 */
+  --color-accent: 217 154 30; /* amber-500 */
+  --color-premium: 110 33 67; /* wine-600 */
+}
+
+@layer base {
+  html {
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  h1, h2, h3 {
+    font-family: "Space Grotesk", system-ui, sans-serif;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 2px;
+  }
+
+  /* Respect prefers-reduced-motion app-wide — see docs/design-system.md §12. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /**
+   * "Glass pearl" surface — used sparingly (auth page, floating panels,
+   * map controls, elevated dashboard cards, modal/dialog surfaces).
+   * NOT applied to dense tables or anywhere legibility of long text
+   * matters more than atmosphere. See docs/design-system.md §4.
+   */
+  .glass-pearl {
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.72), rgb(255 255 255 / 0.55));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(255 255 255 / 0.6);
+    box-shadow:
+      0 12px 32px -8px rgb(14 18 16 / 0.16),
+      0 4px 12px -4px rgb(14 18 16 / 0.08),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.5);
+  }
+
+  .glass-pearl-dark {
+    background: linear-gradient(180deg, rgb(33 41 37 / 0.75), rgb(22 28 25 / 0.68));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    box-shadow:
+      0 12px 32px -8px rgb(0 0 0 / 0.35),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.06);
+  }
+}
