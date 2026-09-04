@@ -1,29 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { scrubAuditContext } from './scrub-audit-context';
+import { AuditEntry } from './audit-entry';
 
-export interface AuditEntry {
-  tenantId?: string;
-  actorId?: string;
-  action: string;
-  resourceType: string;
-  resourceId?: string;
-  context?: Record<string, unknown>;
-}
+export { AuditEntry } from './audit-entry';
 
-/**
- * Spec reference: Section 40 (Auditing).
- *
- * Deliberately fire-and-forget-tolerant in one specific sense: a failure
- * to write an audit record must never fail the business operation it is
- * documenting (e.g. a DB hiccup writing the audit row for a successful
- * login should not turn that into a failed login). The write is still
- * attempted synchronously and logged loudly on failure so the gap is
- * visible in logs/monitoring, not silently swallowed.
- *
- * Never logs secrets - callers must not pass password/token values in
- * `context`; see the denylist note inline below.
- */
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
@@ -39,7 +20,13 @@ export class AuditService {
           action: entry.action,
           resourceType: entry.resourceType,
           resourceId: entry.resourceId,
-          context: entry.context ? scrubAuditContext(entry.context) : undefined,
+          // Cast, not a Prisma namespace import: avoids depending on
+          // exactly how @prisma/client re-exports its Json helper types,
+          // which appears to be broken/renamed in the currently generated
+          // client (see the "no exported member 'Prisma'" error).
+          context: entry.context
+            ? (scrubAuditContext(entry.context) as any)
+            : undefined,
         },
       });
     } catch (error) {

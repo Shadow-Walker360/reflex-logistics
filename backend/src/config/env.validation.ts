@@ -60,4 +60,10 @@ export const envValidationSchema = Joi.object({
   LOG_LEVEL: Joi.string()
     .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent')
     .default('info'),
+
+  // Legal / signup (ADR-012)
+  CURRENT_TERMS_VERSION: Joi.string().default('2026-08-29'),
+  TERMS_URL: Joi.string()
+    .uri()
+    .default('https://reflex-logistics.example/terms'),
 });

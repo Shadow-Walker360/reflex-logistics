@@ -23,7 +23,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +38,11 @@ model Tenant {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   users User[]
+  customers   Customer[]
+  riders      Rider[]
+  vehicles    Vehicle[]
+  deliveries  Delivery[]
+  incidents   Incident[]
 
   @@map("tenants")
 }
@@ -70,11 +74,19 @@ model User {
   isActive     Boolean  @default(true) @map("is_active")
   lockedUntil  DateTime? @map("locked_until")
   failedLoginAttempts Int @default(0) @map("failed_login_attempts")
+  // Terms & conditions acceptance (ADR-012) - required at signup. Version
+  // is stored alongside the timestamp so a future ToS change can be
+  // distinguished from "never accepted" and, if ever legally required,
+  // re-prompted per-version rather than only per-account.
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+  termsVersion    String?   @map("terms_version")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   refreshTokens RefreshToken[]
+  riderProfile  Rider?
+  deliveriesCreated Delivery[] @relation("DeliveriesCreated")
 
   // A given email is unique within a tenant, not globally — two different
   // retailer organizations may legitimately share a rider's contact email
@@ -142,4 +154,202 @@ enum IdempotencyStatus {
   PENDING
   COMPLETED
   FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Delivery domain (Phase 3 - P0-C/D/E)
+//
+// Spec reference: Section 5 (Domain Modules), Section 10 (Delivery State
+// Machine), Section 12 (Database/ERD). Extends the Phase 1/2 schema rather
+// than replacing it, per the build directive Section 6: "No full rewrite is
+// justified... add the next schema slice immediately before or with the
+// service that consumes it."
+//
+// Deliberate simplification, recorded as ADR-011: assignment is modeled as
+// fields directly on Delivery (riderId, vehicleId, assignedAt) rather than
+// a separate Assignment table. The original spec's own concurrency example
+// (Section 14) operates directly on `UPDATE deliveries SET rider_id = ...`,
+// which only makes sense if the assignment IS a Delivery field, not a
+// separate joined table. A standalone Assignment entity would need its own
+// state and its own concurrency handling, duplicating what Delivery.status
+// + Delivery.riderId already express. See ADR-011 for the full trade-off.
+// ---------------------------------------------------------------------------
+
+enum DeliveryStatus {
+  REQUESTED
+  ASSIGNED
+  ACCEPTED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  FAILED
+  REASSIGNMENT_REQUIRED
+}
+
+enum VehicleType {
+  MOTORCYCLE
+  CAR
+  VAN
+  PICKUP
+  TRUCK
+  LORRY
+}
+
+enum IncidentType {
+  VEHICLE_BREAKDOWN
+  RIDER_UNAVAILABLE
+  ACCIDENT
+  ROAD_BLOCKAGE
+  CUSTOMER_UNREACHABLE
+  WRONG_ADDRESS
+  DAMAGED_GOODS
+  OTHER
+}
+
+enum IncidentStatus {
+  OPEN
+  RESOLVED
+}
+
+model Customer {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  phoneNumber String   @map("phone_number")
+  address     String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries Delivery[]
+
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model Rider {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  userId        String   @unique @map("user_id") @db.Uuid
+  isAvailable   Boolean  @default(true) @map("is_available")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicles   Vehicle[]
+  deliveries Delivery[]
+
+  @@index([tenantId])
+  @@index([tenantId, isAvailable])
+  @@map("riders")
+}
+
+model Vehicle {
+  id                String      @id @default(uuid()) @db.Uuid
+  tenantId          String      @map("tenant_id") @db.Uuid
+  riderId           String?     @map("rider_id") @db.Uuid
+  type              VehicleType
+  // Simplified capacity model for MVP (spec Section 19) - a single weight
+  // ceiling is enough to implement the eligibility check in
+  // DispatchService; volume/fragility/perishability are FUTURE per the
+  // original spec and are not modeled until a real ranking algorithm needs
+  // them (Section 18's eligibility/ranking split still applies once they
+  // are added - this is not a redesign, just more fields).
+  capacityWeightKg  Float       @map("capacity_weight_kg")
+  isActive          Boolean     @default(true) @map("is_active")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rider      Rider?     @relation(fields: [riderId], references: [id], onDelete: SetNull)
+  deliveries Delivery[]
+
+  @@index([tenantId])
+  @@map("vehicles")
+}
+
+model Delivery {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  customerId      String         @map("customer_id") @db.Uuid
+  createdByUserId String         @map("created_by_user_id") @db.Uuid
+
+  pickupAddress   String         @map("pickup_address")
+  dropoffAddress  String         @map("dropoff_address")
+  // Cargo requirement, simplified for MVP (spec Section 18/19) - just
+  // enough for DispatchService's eligibility check to be real rather than
+  // a stub. fragile/perishable/declaredValue etc. are FUTURE additions,
+  // not a later redesign, once a real ranking algorithm needs them.
+  weightKg        Float?         @map("weight_kg")
+
+  status          DeliveryStatus @default(REQUESTED)
+  riderId         String?        @map("rider_id") @db.Uuid
+  vehicleId       String?        @map("vehicle_id") @db.Uuid
+  assignedAt      DateTime?      @map("assigned_at")
+  deliveredAt     DateTime?      @map("delivered_at")
+
+  // Proof of delivery (spec Section 26) - single-use, expiring, hash-only
+  // storage, same "never store the usable secret itself" pattern as
+  // RefreshToken.tokenHash (Phase 2).
+  proofTokenHash      String?   @map("proof_token_hash")
+  proofTokenExpiresAt DateTime? @map("proof_token_expires_at")
+  proofConfirmedAt    DateTime? @map("proof_confirmed_at")
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer     Customer              @relation(fields: [customerId], references: [id])
+  createdBy    User                  @relation("DeliveriesCreated", fields: [createdByUserId], references: [id])
+  rider        Rider?                @relation(fields: [riderId], references: [id])
+  vehicle      Vehicle?              @relation(fields: [vehicleId], references: [id])
+  statusEvents DeliveryStatusEvent[]
+  incidents    Incident[]
+
+  // Spec Section 8: every list/lookup query filters by tenantId first: this
+  // composite index makes "tenant's deliveries by status" (the dispatcher
+  // queue, Section 4 of the build directive) an index-only scan rather than
+  // a full tenant scan + filter.
+  @@index([tenantId, status])
+  @@index([tenantId, riderId])
+  @@map("deliveries")
+}
+
+// Spec Section 11 (Delivery History) - append-only, never updated or
+// deleted. This table, not Delivery.status alone, is the source of truth
+// for "what actually happened" per the original spec's explicit framing.
+model DeliveryStatusEvent {
+  id         String          @id @default(uuid()) @db.Uuid
+  deliveryId String          @map("delivery_id") @db.Uuid
+  fromStatus DeliveryStatus? @map("from_status")
+  toStatus   DeliveryStatus  @map("to_status")
+  changedBy  String?         @map("changed_by") @db.Uuid
+  changedAt  DateTime        @default(now()) @map("changed_at")
+  metadata   Json?
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryId])
+  @@map("delivery_status_events")
+}
+
+model Incident {
+  id           String         @id @default(uuid()) @db.Uuid
+  tenantId     String         @map("tenant_id") @db.Uuid
+  deliveryId   String         @map("delivery_id") @db.Uuid
+  reportedById String         @map("reported_by_id") @db.Uuid
+  type         IncidentType
+  description  String
+  status       IncidentStatus @default(OPEN)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  resolvedAt   DateTime?      @map("resolved_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([deliveryId])
+  @@map("incidents")
 }

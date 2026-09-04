@@ -8,10 +8,9 @@ import type { User } from "@/types";
 
 const retailerUser: User = {
   id: "u1",
-  name: "Amina",
   role: "RETAILER",
   tenantId: "t1",
-  createdAt: new Date().toISOString(),
+  email: "amina@acme-logistics.example",
 };
 
 describe("RoleRoute", () => {
@@ -20,7 +19,7 @@ describe("RoleRoute", () => {
   });
 
   it("redirects a Retailer user away from a Dispatcher-only route to their own home", () => {
-    useAuthStore.getState().setSession(retailerUser, "token");
+    useAuthStore.getState().setSession(retailerUser, { accessToken: "tok", refreshToken: "rtok" });
 
     renderWithProviders(
       <Routes>
@@ -37,7 +36,7 @@ describe("RoleRoute", () => {
   });
 
   it("renders the guarded route when the user's role is allowed", () => {
-    useAuthStore.getState().setSession(retailerUser, "token");
+    useAuthStore.getState().setSession(retailerUser, { accessToken: "tok", refreshToken: "rtok" });
 
     renderWithProviders(
       <Routes>

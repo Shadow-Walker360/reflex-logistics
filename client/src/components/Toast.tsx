@@ -1,5 +1,15 @@
 import { create } from "zustand";
 
+/**
+ * NOTE ON FILE STRUCTURE: an earlier revision split `useToastStore` into
+ * its own file purely to satisfy the react-refresh/only-export-components
+ * lint rule. That split was reverted alongside the same change in
+ * AuthProvider.tsx — see that file's docstring for why (it caused
+ * "is not a function" failures specifically under Vitest's SSR transform
+ * on Windows). The resulting lint warning here is suppressed with a
+ * targeted, legitimate disable comment instead.
+ */
+
 type ToastTone = "info" | "success" | "danger";
 
 interface Toast {
@@ -15,6 +25,7 @@ interface ToastState {
 }
 
 /** UI state — ephemeral notifications, not server data. */
+// eslint-disable-next-line react-refresh/only-export-components -- see file docstring: intentionally kept alongside ToastViewport rather than split, for stability.
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   push: (tone, message) =>
