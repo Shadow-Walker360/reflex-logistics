@@ -34,4 +34,16 @@ export default () => ({
   logging: {
     level: process.env.LOG_LEVEL || 'info',
   },
+
+  // ADR-012: self-service signup requires explicit terms acceptance.
+  // CURRENT_TERMS_VERSION is a plain string identifier (e.g. a date or
+  // semantic version) bumped whenever the terms text materially changes -
+  // stored alongside each user's acceptance so "which version did they
+  // agree to" is always answerable. TERMS_URL is where the frontend links
+  // to the actual document; the backend does not host or render legal
+  // content itself (see GET /legal/terms).
+  legal: {
+    currentTermsVersion: process.env.CURRENT_TERMS_VERSION || '2026-08-29',
+    termsUrl: process.env.TERMS_URL || 'https://reflex-logistics.example/terms',
+  },
 });

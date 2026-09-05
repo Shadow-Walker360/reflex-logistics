@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Routes, Route } from "react-router-dom";
-import { renderWithProviders } from "../../test-utils";
+import { renderWithProviders, fakeAccessToken } from "../../test-utils";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { useAuthStore } from "@/state/authStore";
@@ -10,8 +10,9 @@ import { ApiError } from "@/api/errors";
 
 vi.mock("@/services/authService", () => ({
   authService: {
-    getSession: vi.fn(() => Promise.reject(new ApiError("no session", "UNAUTHENTICATED"))),
     login: vi.fn(),
+    signup: vi.fn(),
+    refresh: vi.fn(),
     logout: vi.fn(),
   },
 }));
@@ -35,13 +36,13 @@ describe("LoginPage", () => {
   beforeEach(() => {
     useAuthStore.getState().clearSession();
     vi.clearAllMocks();
-    vi.mocked(authService.getSession).mockRejectedValue(new ApiError("no session", "UNAUTHENTICATED"));
   });
 
-  it("renders the sign-in form", async () => {
+  it("renders the sign-in form with organization ID, email, and password — no 'identifier' field", async () => {
     renderLoginPage();
     expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/email or phone/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/organization id/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password\b/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });
@@ -53,9 +54,49 @@ describe("LoginPage", () => {
 
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(await screen.findByText("Enter your phone number or email.")).toBeInTheDocument();
+    expect(await screen.findByText("Enter your organization ID.")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email.")).toBeInTheDocument();
     expect(screen.getByText("Enter your password.")).toBeInTheDocument();
     expect(authService.login).not.toHaveBeenCalled();
+  });
+
+  it("rejects an organization ID with invalid characters before calling the API", async () => {
+    const user = userEvent.setup();
+    renderLoginPage();
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByLabelText(/organization id/i), "Acme Logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme.example");
+    await user.type(screen.getByLabelText(/^password\b/i), "whatever");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(
+      await screen.findByText(/lowercase letters, numbers, and hyphens only/i)
+    ).toBeInTheDocument();
+    expect(authService.login).not.toHaveBeenCalled();
+  });
+
+  it("submits exactly { tenantSlug, email, password } — no identifier field", async () => {
+    vi.mocked(authService.login).mockResolvedValue({
+      accessToken: fakeAccessToken({ sub: "u1", tenantId: "t1", role: "RETAILER" }),
+      refreshToken: "rtok",
+    });
+
+    const user = userEvent.setup();
+    renderLoginPage();
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
+    await user.type(screen.getByLabelText(/^password\b/i), "correct-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await screen.findByText("Retailer dashboard");
+    expect(authService.login).toHaveBeenCalledWith({
+      tenantSlug: "acme-logistics",
+      email: "owner@acme-logistics.example",
+      password: "correct-password",
+    });
   });
 
   it("shows a loading state while signing in", async () => {
@@ -70,7 +111,8 @@ describe("LoginPage", () => {
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.type(screen.getByLabelText(/email or phone/i), "amina@example.com");
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
     await user.type(screen.getByLabelText(/^password\b/i), "correct-password");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
@@ -78,25 +120,47 @@ describe("LoginPage", () => {
     expect(submitButton).toBeDisabled();
 
     resolveLogin({
-      user: { id: "u1", name: "Amina", role: "RETAILER", tenantId: "t1", createdAt: new Date().toISOString() },
-      token: "tok",
+      accessToken: fakeAccessToken({ sub: "u1", tenantId: "t1", role: "RETAILER" }),
+      refreshToken: "rtok",
     });
     await screen.findByText("Retailer dashboard");
   });
 
-  it("maps a 401 to plain-language 'incorrect' copy, never a raw status code", async () => {
-    vi.mocked(authService.login).mockRejectedValue(new ApiError("Unauthorized", "UNAUTHENTICATED", { status: 401 }));
+  it("maps a 401 to generic 'incorrect' copy that never implies which field was wrong", async () => {
+    vi.mocked(authService.login).mockRejectedValue(
+      new ApiError("Invalid credentials", "UNAUTHENTICATED", { status: 401 })
+    );
 
     const user = userEvent.setup();
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.type(screen.getByLabelText(/email or phone/i), "amina@example.com");
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
     await user.type(screen.getByLabelText(/^password\b/i), "wrong-password");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(await screen.findByText("Your email or password is incorrect.")).toBeInTheDocument();
+    expect(await screen.findByText("Incorrect organization ID, email, or password.")).toBeInTheDocument();
     expect(screen.queryByText(/401/)).not.toBeInTheDocument();
+  });
+
+  it("maps a 403 to an account-lockout message, distinct from generic 'incorrect' copy", async () => {
+    vi.mocked(authService.login).mockRejectedValue(
+      new ApiError("Account locked", "FORBIDDEN", { status: 403 })
+    );
+
+    const user = userEvent.setup();
+    renderLoginPage();
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
+    await user.type(screen.getByLabelText(/^password\b/i), "wrong-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(
+      await screen.findByText(/temporarily locked after several failed attempts/i)
+    ).toBeInTheDocument();
   });
 
   it("maps a network failure to connection-specific copy", async () => {
@@ -106,7 +170,8 @@ describe("LoginPage", () => {
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.type(screen.getByLabelText(/email or phone/i), "amina@example.com");
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
     await user.type(screen.getByLabelText(/^password\b/i), "whatever");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
@@ -115,17 +180,18 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("routes a successfully authenticated Retailer to /retailer", async () => {
+  it("routes a successfully authenticated Retailer (decoded from the access token) to /retailer", async () => {
     vi.mocked(authService.login).mockResolvedValue({
-      user: { id: "u1", name: "Amina", role: "RETAILER", tenantId: "t1", createdAt: new Date().toISOString() },
-      token: "tok",
+      accessToken: fakeAccessToken({ sub: "u1", tenantId: "t1", role: "RETAILER" }),
+      refreshToken: "rtok",
     });
 
     const user = userEvent.setup();
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.type(screen.getByLabelText(/email or phone/i), "amina@example.com");
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "owner@acme-logistics.example");
     await user.type(screen.getByLabelText(/^password\b/i), "correct-password");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
@@ -134,15 +200,16 @@ describe("LoginPage", () => {
 
   it("routes a successfully authenticated Dispatcher to /dispatcher, not the retailer route", async () => {
     vi.mocked(authService.login).mockResolvedValue({
-      user: { id: "u2", name: "Kevin", role: "DISPATCHER", tenantId: "t1", createdAt: new Date().toISOString() },
-      token: "tok",
+      accessToken: fakeAccessToken({ sub: "u2", tenantId: "t1", role: "DISPATCHER" }),
+      refreshToken: "rtok",
     });
 
     const user = userEvent.setup();
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.type(screen.getByLabelText(/email or phone/i), "kevin@example.com");
+    await user.type(screen.getByLabelText(/organization id/i), "acme-logistics");
+    await user.type(screen.getByLabelText(/^email/i), "kevin@acme-logistics.example");
     await user.type(screen.getByLabelText(/^password\b/i), "correct-password");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
@@ -165,16 +232,16 @@ describe("LoginPage", () => {
     expect(screen.getByRole("button", { name: /hide password/i })).toBeInTheDocument();
   });
 
-  it("keeps the sign-in button keyboard-reachable and correctly labeled for assistive tech", async () => {
+  it("keeps the sign-in controls keyboard-reachable and correctly labeled for assistive tech", async () => {
     renderLoginPage();
     await screen.findByRole("heading", { name: /welcome back/i });
 
-    const identifierInput = screen.getByLabelText(/email or phone/i);
+    const tenantInput = screen.getByLabelText(/organization id/i);
+    const emailInput = screen.getByLabelText(/^email/i);
     const passwordInput = screen.getByLabelText(/^password\b/i);
     const submitButton = screen.getByRole("button", { name: /sign in/i });
 
-    // All three key controls must be real, focusable, non-decorative elements.
-    for (const el of [identifierInput, passwordInput, submitButton]) {
+    for (const el of [tenantInput, emailInput, passwordInput, submitButton]) {
       expect(el).not.toHaveAttribute("aria-hidden");
       expect(el.tabIndex).not.toBe(-1);
     }

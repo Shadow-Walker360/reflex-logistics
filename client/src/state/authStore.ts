@@ -2,38 +2,47 @@ import { create } from "zustand";
 import type { User } from "@/types";
 
 /**
- * In-memory session state. Deliberately NOT persisted to localStorage by
- * default — token storage strategy is a BACKEND DEPENDENCY (Section 20 of
- * the frontend spec: "to be validated against the backend's chosen auth
- * mechanism"). Holding it only in memory means a hard refresh logs the
- * user out until session-refresh (Section 7) is implemented against a
- * confirmed backend contract; that's an intentional, documented gap, not
- * an oversight — see client/README.md "Backend Dependencies".
+ * In-memory session state. Deliberately NOT persisted to localStorage —
+ * storing a refresh token client-side in localStorage is a real XSS
+ * exposure, and there's no backend-provided alternative to lean on: the
+ * backend confirms it uses no cookies at all (FRONTEND_API_CONTRACT.md
+ * §7 — "No cookies are used anywhere") and has no session-bootstrap
+ * endpoint (§3 — `GET /auth/me` does not exist). So a hard page refresh
+ * genuinely logs the user out today; there is nothing to bootstrap from
+ * even in principle without the frontend choosing to persist a token
+ * itself, which is a deliberate trade-off left undecided here, not an
+ * oversight — see client/README.md.
  *
  * This store is UI/session state, not server data — TanStack Query owns
- * everything else that comes from the API (Section "STATE MANAGEMENT").
+ * everything else that comes from the API.
  */
 interface AuthState {
   user: User | null;
-  /** Bearer token for API requests. Never logged, never rendered. */
-  token: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
   status: "idle" | "authenticated" | "unauthenticated";
-  setSession: (user: User, token: string) => void;
+  setSession: (user: User, tokens: { accessToken: string; refreshToken: string }) => void;
+  /** Updates tokens only, keeping the current user — used after a silent refresh. */
+  setTokens: (tokens: { accessToken: string; refreshToken: string }) => void;
   clearSession: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  token: null,
+  accessToken: null,
+  refreshToken: null,
   status: "idle",
-  setSession: (user, token) => set({ user, token, status: "authenticated" }),
-  clearSession: () => set({ user: null, token: null, status: "unauthenticated" }),
+  setSession: (user, tokens) =>
+    set({ user, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, status: "authenticated" }),
+  setTokens: (tokens) => set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }),
+  clearSession: () => set({ user: null, accessToken: null, refreshToken: null, status: "unauthenticated" }),
 }));
 
-/**
- * Non-reactive accessor for use outside React components (e.g. the API
- * client's header-injection boundary, where a hook can't be called).
- */
+/** Non-reactive accessors for use outside React components (e.g. api/client.ts's header-injection boundary). */
 export function getAuthToken(): string | null {
-  return useAuthStore.getState().token;
+  return useAuthStore.getState().accessToken;
+}
+
+export function getRefreshToken(): string | null {
+  return useAuthStore.getState().refreshToken;
 }

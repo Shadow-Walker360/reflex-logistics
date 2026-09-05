@@ -2,6 +2,11 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { RoleRoute } from "@/features/auth/RoleRoute";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { SignUpPage } from "@/features/auth/SignUpPage";
+import { PrivacyPolicyPage } from "@/pages/legal/PrivacyPolicyPage";
+import { TermsOfServicePage } from "@/pages/legal/TermsOfServicePage";
+import { RiderAgreementPage } from "@/pages/legal/RiderAgreementPage";
+import { RetailerAgreementPage } from "@/pages/legal/RetailerAgreementPage";
 import { UnauthorizedPage } from "@/pages/UnauthorizedPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
@@ -32,6 +37,11 @@ import { AdminLayout } from "@/layouts/AdminLayout";
  */
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
+  { path: "/signup", element: <SignUpPage /> },
+  { path: "/privacy", element: <PrivacyPolicyPage /> },
+  { path: "/terms", element: <TermsOfServicePage /> },
+  { path: "/rider-agreement", element: <RiderAgreementPage /> },
+  { path: "/retailer-agreement", element: <RetailerAgreementPage /> },
   { path: "/unauthorized", element: <UnauthorizedPage /> },
 
   {
@@ -88,7 +98,7 @@ export const router = createBrowserRouter([
 
       {
         // Placeholder only — see AdminLayout docstring.
-        element: <RoleRoute allow={["SUPPORT_ADMIN", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"]} />,
+        element: <RoleRoute allow={["SUPPORT_ADMIN", "MANAGER_ADMIN", "SYSTEM_ADMIN"]} />,
         children: [{ path: "/admin", element: <AdminLayout /> }],
       },
     ],

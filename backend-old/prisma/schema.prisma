@@ -1,0 +1,145 @@
+// Reflex Logistics — Prisma schema
+//
+// STATUS: Phase 1 (Foundation) + Phase 2 (Identity/Security) entities only.
+//
+// Spec reference: BACKEND ENGINEERING SPECIFICATION, Section 12 (Database / ERD).
+// The full ERD there includes Order, Delivery, DeliveryStatusEvent, Rider,
+// Vehicle, Assignment, Payment, Incident, Notification, AuditLog, etc.
+// Those are intentionally NOT modeled here yet — they belong to Phase 3
+// (Core Delivery Domain) and Phase 4 (Dispatch), which have not been built
+// in this milestone. Modeling them now, ahead of the services that use
+// them, would violate the "build in vertical slices" instruction and
+// produce untested, speculative schema.
+//
+// Every table below implements the spec's stated principles:
+//  - UUID primary keys (Section 12: avoid sequential-int cross-tenant enumeration)
+//  - tenant_id on every tenant-scoped table, indexed (Section 8: multi-tenancy)
+//  - created_at / updated_at on all tables
+//  - enums for state fields rather than free text
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users User[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+// Spec Section 7: roles are a fixed MVP set. Permission-level modeling
+// (Section 7's "permissions separate from roles") is DESIGNED but deferred —
+// MVP checks role membership directly in guards; see docs/decisions for the
+// ADR recording this simplification.
+enum UserRole {
+  RETAILER
+  DISPATCHER
+  RIDER
+  SUPPORT_ADMIN
+  MANAGER_ADMIN
+  SYSTEM_ADMIN
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String
+  phoneNumber  String?  @map("phone_number")
+  passwordHash String   @map("password_hash")
+  role         UserRole
+  isActive     Boolean  @default(true) @map("is_active")
+  lockedUntil  DateTime? @map("locked_until")
+  failedLoginAttempts Int @default(0) @map("failed_login_attempts")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  // A given email is unique within a tenant, not globally — two different
+  // retailer organizations may legitimately share a rider's contact email
+  // in principle, and MVP does not assume a single global identity space.
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+// Spec Section 6 (Authentication): access tokens are short-lived and
+// stateless (JWT); refresh tokens are DB-backed specifically so they can be
+// revoked immediately on logout or on suspected compromise. The token value
+// itself is never stored — only its hash — so a database read alone cannot
+// produce a usable token.
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Spec Section 40 (Auditing). Modeled now because Phase 2 (auth) already
+// needs to record login attempts and lockouts.
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String?  @map("tenant_id") @db.Uuid
+  actorId      String?  @map("actor_id") @db.Uuid
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id") @db.Uuid
+  context      Json?
+  occurredAt   DateTime @default(now()) @map("occurred_at")
+
+  @@index([tenantId])
+  @@index([actorId])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
+
+// Spec Section 15 (Idempotency). Generic, reusable across operation types —
+// scoped by a composite key of (tenant, operation type, client-supplied key).
+model IdempotencyKey {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  operationType String  @map("operation_type")
+  key          String
+  status       IdempotencyStatus @default(PENDING)
+  responseBody Json?    @map("response_body")
+  responseStatus Int?   @map("response_status")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, operationType, key])
+  @@map("idempotency_keys")
+}
+
+enum IdempotencyStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}

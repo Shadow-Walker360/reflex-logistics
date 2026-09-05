@@ -51,7 +51,7 @@ export function RetailerLayout() {
               {navItem("/retailer/create", "Create Delivery", <PackagePlus className="h-full w-full" />)}
               {navItem("/retailer/history", "History", <History className="h-full w-full" />)}
             </nav>
-            <span className="hidden text-supporting text-muted sm:inline">{user?.name}</span>
+            <span className="hidden text-supporting text-muted sm:inline">{user?.email}</span>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
               Log out

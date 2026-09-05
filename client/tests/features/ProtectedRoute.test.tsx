@@ -6,13 +6,15 @@ import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { useAuthStore } from "@/state/authStore";
 import { vi } from "vitest";
 
-// AuthProvider does a session-check network call on mount; stub the
-// service so this test exercises ProtectedRoute's own logic, not the
-// network layer.
+// AuthProvider no longer makes a network call on mount (there is no
+// session-bootstrap endpoint — FRONTEND_API_CONTRACT.md §3), but the
+// service module is still mocked here for isolation from the real
+// authService, matching the confirmed contract's shape.
 vi.mock("@/services/authService", () => ({
   authService: {
-    getSession: () => Promise.reject(new Error("no session")),
     login: vi.fn(),
+    signup: vi.fn(),
+    refresh: vi.fn(),
     logout: vi.fn(),
   },
 }));

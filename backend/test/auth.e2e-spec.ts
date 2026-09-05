@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  VersioningType,
+} from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
@@ -40,7 +44,11 @@ describe('Auth (e2e)', () => {
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
     app.useGlobalFilters(new GlobalExceptionFilter());
     await app.init();
@@ -71,6 +79,80 @@ describe('Auth (e2e)', () => {
     await app.close();
   });
 
+  describe('POST /api/v1/auth/signup', () => {
+    const signupBase = {
+      organizationName: 'New Co',
+      tenantSlug: 'new-co-signup-test',
+      email: 'founder@new-co.example',
+      password: 'a-strong-signup-password',
+      acceptedTerms: true,
+    };
+
+    afterEach(async () => {
+      // Best-effort cleanup - a signup test that fails partway shouldn't
+      // leave a Tenant/User pair behind to collide with the next run.
+      await prisma.user.deleteMany({ where: { email: signupBase.email } });
+      await prisma.tenant.deleteMany({
+        where: { slug: signupBase.tenantSlug },
+      });
+    });
+
+    it('creates a tenant + admin user and returns tokens (auto-login)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .send(signupBase)
+        .expect(201);
+
+      expect(res.body.accessToken).toBeDefined();
+      expect(res.body.refreshToken).toBeDefined();
+
+      const createdTenant = await prisma.tenant.findUnique({
+        where: { slug: signupBase.tenantSlug },
+      });
+      expect(createdTenant).not.toBeNull();
+
+      const createdUser = await prisma.user.findFirst({
+        where: { email: signupBase.email },
+      });
+      expect(createdUser?.role).toBe('MANAGER_ADMIN');
+      expect(createdUser?.termsAcceptedAt).not.toBeNull();
+      expect(createdUser?.termsVersion).toBeDefined();
+    });
+
+    it('rejects signup with acceptedTerms: false (400, no account created)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .send({ ...signupBase, acceptedTerms: false })
+        .expect(400);
+
+      const createdUser = await prisma.user.findFirst({
+        where: { email: signupBase.email },
+      });
+      expect(createdUser).toBeNull();
+    });
+
+    it('rejects a duplicate tenantSlug with 409 CONFLICT', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .send(signupBase)
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .send({ ...signupBase, email: 'someone-else@new-co.example' })
+        .expect(409);
+
+      expect(res.body.error.code).toBe('CONFLICT');
+    });
+
+    it('rejects a malformed tenantSlug (uppercase/spaces) with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .send({ ...signupBase, tenantSlug: 'Not A Valid Slug' })
+        .expect(400);
+    });
+  });
+
   describe('POST /api/v1/auth/login', () => {
     it('returns an access and refresh token for valid credentials', async () => {
       const res = await request(app.getHttpServer())
@@ -94,7 +176,11 @@ describe('Auth (e2e)', () => {
     it('returns the SAME generic 401 for a nonexistent email (does not leak account existence)', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
-        .send({ tenantSlug, email: 'nobody@acme-test.example', password: 'whatever' })
+        .send({
+          tenantSlug,
+          email: 'nobody@acme-test.example',
+          password: 'whatever',
+        })
         .expect(401);
 
       expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
@@ -121,11 +207,17 @@ describe('Auth (e2e)', () => {
       // faster than the others.
       const time = async (body: Record<string, string>) => {
         const start = Date.now();
-        await request(app.getHttpServer()).post('/api/v1/auth/login').send(body);
+        await request(app.getHttpServer())
+          .post('/api/v1/auth/login')
+          .send(body);
         return Date.now() - start;
       };
 
-      const wrongPasswordMs = await time({ tenantSlug, email, password: 'wrong-password' });
+      const wrongPasswordMs = await time({
+        tenantSlug,
+        email,
+        password: 'wrong-password',
+      });
       const noSuchTenantMs = await time({
         tenantSlug: 'no-such-tenant-xyz',
         email,
@@ -170,7 +262,9 @@ describe('Auth (e2e)', () => {
       // Fresh account for this test to avoid the lockout state from the
       // suite above.
       const freshEmail = 'rider@acme-test.example';
-      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: tenantSlug } });
+      const tenant = await prisma.tenant.findUniqueOrThrow({
+        where: { slug: tenantSlug },
+      });
       await prisma.user.create({
         data: {
           tenantId: tenant.id,
@@ -206,7 +300,9 @@ describe('Auth (e2e)', () => {
 
     it('logout revokes the refresh token so it can no longer be used', async () => {
       const freshEmail = 'retailer@acme-test.example';
-      const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: tenantSlug } });
+      const tenant = await prisma.tenant.findUniqueOrThrow({
+        where: { slug: tenantSlug },
+      });
       await prisma.user.create({
         data: {
           tenantId: tenant.id,

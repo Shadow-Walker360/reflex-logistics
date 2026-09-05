@@ -35,7 +35,7 @@ export function DispatcherLayout() {
         accentClassName="bg-teal-600"
         right={
           <>
-            <span className="text-supporting text-muted">{user?.name}</span>
+            <span className="text-supporting text-muted">{user?.email}</span>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
               Log out

@@ -1,6 +1,6 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button, Input, Alert } from "@/components";
@@ -12,17 +12,21 @@ import { homeRouteForRole } from "./roleRouting";
 import { AuthVisual } from "./AuthVisual";
 
 /**
- * Login-specific error copy (docs/ux-guidelines.md "Authentication UX").
- * The generic API_ERROR_MESSAGES (src/api/errors.ts) phrases UNAUTHENTICATED
- * as "your session has ended," which is correct for an expired session but
- * wrong for a failed login attempt — a 401 on the login endpoint means
- * "wrong credentials," not "you were logged in and now aren't." This map
- * overrides copy for the categories the brief calls out explicitly (§11);
- * anything else falls back to the shared API_ERROR_MESSAGES.
+ * Login-specific error copy (docs/ux-guidelines.md "Authentication UX"),
+ * updated for the CONFIRMED backend contract (FRONTEND_API_CONTRACT.md §3):
+ *
+ *  - 401 covers wrong tenant ID, wrong email, OR wrong password, and the
+ *    backend deliberately returns the identical error code/message for
+ *    all three ("so the frontend cannot and should not try to
+ *    distinguish 'no such account' from 'wrong password'"). The copy
+ *    below matches that intent — it never implies which field was wrong.
+ *  - 403 means something different here than the app's generic FORBIDDEN
+ *    copy: it's an account lockout (5 failed attempts → 15-minute lock),
+ *    which the backend says IS safe to distinguish and show plainly.
  */
 const LOGIN_ERROR_MESSAGES: Partial<Record<ApiError["category"], string>> = {
-  UNAUTHENTICATED: "Your email or password is incorrect.",
-  FORBIDDEN: "You don't have permission to access this workspace.",
+  UNAUTHENTICATED: "Incorrect organization ID, email, or password.",
+  FORBIDDEN: "Your account is temporarily locked after several failed attempts. Please try again in 15 minutes.",
   NETWORK_ERROR: "We couldn't connect to Reflex. Check your connection and try again.",
 };
 
@@ -44,11 +48,11 @@ export function LoginPage() {
     try {
       await login(values);
       const user = useAuthStore.getState().user;
-      // Role-based post-login routing (brief §12): destination is derived
-      // from the authenticated user's role as returned by the backend
-      // (homeRouteForRole reads user.role from the login response), never
-      // from anything the client supplied. This is navigation only — the
-      // backend independently authorizes every request those screens make.
+      // Role-based post-login routing: destination is derived from the
+      // role decoded out of the backend's own access token (see
+      // AuthProvider.tsx), never from anything the client supplied. This
+      // is navigation only — the backend independently authorizes every
+      // request those screens make.
       const redirectTo =
         (location.state as { from?: Location } | null)?.from?.pathname ??
         (user ? homeRouteForRole(user.role) : "/");
@@ -68,7 +72,7 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Left — brand/product story. Hidden below md; the form is always
-          the primary focus on mobile (brief §10). */}
+          the primary focus on mobile. */}
       <div className="relative hidden w-1/2 overflow-hidden bg-graphite-950 md:block">
         <div className="absolute inset-0">
           <AuthVisual />
@@ -109,11 +113,20 @@ export function LoginPage() {
 
             <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
               <Input
-                label="Email or phone"
+                label="Organization ID"
+                required
+                autoComplete="organization"
+                hint="The workspace ID your organization uses on Reflex (e.g. acme-logistics)."
+                error={errors.tenantSlug?.message}
+                {...register("tenantSlug")}
+              />
+              <Input
+                label="Email"
+                type="email"
                 required
                 autoComplete="username"
-                error={errors.identifier?.message}
-                {...register("identifier")}
+                error={errors.email?.message}
+                {...register("email")}
               />
               <Input
                 label="Password"
@@ -141,15 +154,22 @@ export function LoginPage() {
 
               {/*
                 No "remember me" and no "forgot password" — neither is a
-                confirmed backend capability yet (brief §9: "do not invent
-                authentication capabilities the backend does not support").
-                See client/README.md §12 Backend Dependencies.
+                backend capability (FRONTEND_API_CONTRACT.md §10/§11 lists
+                password-reset explicitly under "NOT IMPLEMENTED — do not
+                build against these").
               */}
 
               <Button type="submit" isLoading={isSubmitting} className="mt-2 w-full" size="lg">
                 {isSubmitting ? "Signing in…" : "Sign in"}
               </Button>
             </form>
+
+            <p className="mt-5 text-center text-supporting text-muted">
+              New to Reflex?{" "}
+              <Link to="/signup" className="font-medium text-primary hover:text-primary-hover">
+                Create an account
+              </Link>
+            </p>
           </div>
         </div>
       </div>

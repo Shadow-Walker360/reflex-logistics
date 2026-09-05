@@ -15,6 +15,14 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { AuditModule } from './audit/audit.module';
+import { LegalModule } from './legal/legal.module';
+import { CustomersModule } from './customers/customers.module';
+import { DeliveriesModule } from './deliveries/deliveries.module';
+import { RidersModule } from './riders/riders.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
+import { DispatchModule } from './dispatch/dispatch.module';
+import { IncidentsModule } from './incidents/incidents.module';
+import { AdministrationModule } from './administration/administration.module';
 
 @Module({
   imports: [
@@ -56,6 +64,14 @@ import { AuditModule } from './audit/audit.module';
     AuditModule,
     UsersModule,
     AuthModule,
+    LegalModule,
+    CustomersModule,
+    DeliveriesModule,
+    RidersModule,
+    VehiclesModule,
+    DispatchModule,
+    IncidentsModule,
+    AdministrationModule,
   ],
 })
 export class AppModule implements NestModule {

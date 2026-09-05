@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../database/prisma.service';
 import { UsersService } from '../users/users.service';
 import { PasswordService } from './password.service';
@@ -50,6 +51,7 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
   async login(
@@ -242,5 +244,111 @@ export class AuthService {
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  /**
+   * Spec deviation, recorded in ADR-012: self-service organization signup,
+   * overriding the original spec's "admin-created accounts only" MVP
+   * scope. Creates a brand-new Tenant AND its first User (MANAGER_ADMIN
+   * for that tenant) in a single transaction - this is "a new
+   * organization joins Reflex," not "invite a teammate to an existing
+   * organization" (which would need an invitation-token flow and is not
+   * built).
+   *
+   * Terms-and-conditions acceptance is enforced at the DTO layer
+   * (SignupDto's @MustBeTrue()) before this method is ever called, but the
+   * acceptance record (timestamp + version) is written here, as part of
+   * the same transaction that creates the account - so it's never
+   * possible for a User row to exist without a corresponding terms
+   * acceptance record.
+   */
+  async signup(
+    organizationName: string,
+    tenantSlug: string,
+    email: string,
+    password: string,
+    context: { ip?: string } = {},
+  ): Promise<LoginResult> {
+    const existingTenant = await this.prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+    });
+    if (existingTenant) {
+      // Unlike login's deliberately-generic-across-failure-reasons
+      // approach (Section 6), signup's tenantSlug collision is NOT a
+      // security-sensitive existence check to hide - the whole point of
+      // choosing a slug is picking one that isn't taken yet, the same as
+      // any username/handle-picking flow. A generic message here would
+      // just make the signup form unusable.
+      throw new AppException(
+        AppErrorCode.CONFLICT,
+        'This organization identifier is already taken. Please choose a different one.',
+      );
+    }
+
+    const passwordHash = await this.passwords.hash(password);
+    const termsVersion = this.config.get<string>('legal.currentTermsVersion');
+
+    let tenant, user;
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: { name: organizationName, slug: tenantSlug },
+        });
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email,
+            passwordHash,
+            role: 'MANAGER_ADMIN',
+            termsAcceptedAt: new Date(),
+            termsVersion,
+          },
+        });
+        return { tenant, user };
+      });
+      tenant = result.tenant;
+      user = result.user;
+    } catch (error: any) {
+      // Race condition, not just a pre-check gap: two concurrent signups
+      // could both pass the findUnique check above (slug not yet taken)
+      // before either transaction commits. The database's unique
+      // constraint on Tenant.slug is the real guarantee here (the
+      // findUnique check above is only a fast-path UX improvement to
+      // avoid an unnecessary bcrypt hash + transaction attempt in the
+      // common case) - Prisma's P2002 error code on that constraint is
+      // caught here and converted to the same 409 a pre-check failure
+      // would produce, rather than surfacing as an unhandled 500.
+      if (error?.code === 'P2002') {
+        throw new AppException(
+          AppErrorCode.CONFLICT,
+          'This organization identifier is already taken. Please choose a different one.',
+        );
+      }
+      throw error;
+    }
+
+    const pair = await this.tokens.issueTokenPair(
+      user.id,
+      tenant.id,
+      user.role,
+    );
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: this.tokens.hashRefreshToken(pair.refreshToken),
+        expiresAt: pair.refreshTokenExpiresAt,
+      },
+    });
+
+    await this.audit.record({
+      tenantId: tenant.id,
+      actorId: user.id,
+      action: 'auth.signup_succeeded',
+      resourceType: 'Tenant',
+      resourceId: tenant.id,
+      context: { email, tenantSlug, termsVersion, ip: context.ip },
+    });
+
+    return { accessToken: pair.accessToken, refreshToken: pair.refreshToken };
   }
 }

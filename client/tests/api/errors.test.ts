@@ -17,6 +17,15 @@ describe("API error normalization", () => {
     expect(API_ERROR_MESSAGES.CONFLICT).toMatch(/updated elsewhere/i);
   });
 
+  it("categorizes 422 as BUSINESS_RULE_VIOLATION, per the confirmed backend error contract", () => {
+    expect(categoryForStatus(422)).toBe("BUSINESS_RULE_VIOLATION");
+  });
+
+  it("categorizes 503 as SERVICE_UNAVAILABLE, distinct from a generic 5xx SERVER_ERROR", () => {
+    expect(categoryForStatus(503)).toBe("SERVICE_UNAVAILABLE");
+    expect(categoryForStatus(500)).toBe("SERVER_ERROR");
+  });
+
   it("never claims success language for any 4xx/5xx category", () => {
     for (const message of Object.values(API_ERROR_MESSAGES)) {
       expect(message.toLowerCase()).not.toMatch(/success/);
